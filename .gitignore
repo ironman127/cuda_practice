@@ -1,0 +1,28 @@
+# .gitignore
+cat > .gitignore << 'EOF'
+# 编译产物
+*.o
+*.out
+*.exe
+*.ptx
+
+# 可执行文件（没有扩展名的）
+*/[a-z0-9_]*
+!**/*.cu
+!**/*.h
+!**/*.py
+!**/*.md
+!**/build.sh
+
+# Profiling 结果
+*.ncu-rep
+*.nsys-rep
+*.qdrep
+
+# Python
+__pycache__/
+*.pyc
+.ipynb_checkpoints/
+
+# 数据
+data/
