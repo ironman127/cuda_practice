@@ -13,10 +13,10 @@ do {                                                             \
 
 __global__ void matrix_multiple_kernel(float *A, float *B, float *C, size_t I, size_t K, size_t J, size_t sh_size) {
 
-    extern __shared__ float A_B[];
+    extern __shared__ char A_B[];
 
-    float *As = A_B;
-    float *Bs = A_B + sh_size / 2;
+    float *As = (float*)A_B;
+    float *Bs = (float*)(A_B + sh_size / 2);
     size_t TILE_SIZE = blockDim.x;
 
     size_t row = blockDim.y * blockIdx.y + threadIdx.y;
@@ -28,23 +28,29 @@ __global__ void matrix_multiple_kernel(float *A, float *B, float *C, size_t I, s
         size_t cur_col = (i*TILE_SIZE + threadIdx.x);
 
         if (cur_col < K && row < I) {
-            As[TILE_SIZE*threadIdx.y + threadIdx.x] = A[row*K + cur_col];
+            As[TILE_SIZE * threadIdx.y + threadIdx.x] = A[row*K + cur_col];
+        } else {
+            As[TILE_SIZE * threadIdx.y + threadIdx.x] = 0;
         }
 
         if (cur_row < K && col < J) {
-            Bs[TILE_SIZE*threadIdx.x + threadIdx.y] = B[cur_row*J + col];
+            Bs[TILE_SIZE * threadIdx.y + threadIdx.x] = B[cur_row*J + col];
+        } else {
+            Bs[TILE_SIZE * threadIdx.y + threadIdx.x] = 0;
         }
 
         __syncthreads();
 
         for (int j = 0; j < TILE_SIZE; ++j) {
-            cs += As[threadIdx.y*TILE_SIZE + j] * Bs[j*TILE_SIZE + threadIdx.x];
+            cs += As[threadIdx.y * TILE_SIZE + j] * Bs[j*TILE_SIZE + threadIdx.x];
         }
 
         __syncthreads();
     }
 
-    C[row * J + col] = cs;
+    if ((row < I) && (col < J)) {
+        C[row * J + col] = cs;
+    }
 }
 
 
@@ -78,8 +84,8 @@ void matirx_multiple(float *A_h, float *B_h, float *C_h, size_t I, size_t K, siz
     cudaMemcpy(A_d, A_h, I * K * sizeof(float), cudaMemcpyHostToDevice);
     cudaMemcpy(B_d, B_h, K * J * sizeof(float), cudaMemcpyHostToDevice);
 
-    dim3 b_dim = {16, 16, 1};
-    dim3 g_dim = {(K + b_dim.x - 1) / b_dim.x, (I + b_dim.y - 1) / b_dim.y, 1};
+    dim3 b_dim = {3, 3, 1};
+    dim3 g_dim = {(J + b_dim.x - 1) / b_dim.x, (I + b_dim.y - 1) / b_dim.y, 1};
     size_t sh_size = calculate_share_mem_size(b_dim.x * b_dim.y);
 
     matrix_multiple_kernel<<<g_dim, b_dim, sh_size>>>(A_d, B_d, C_d, I, K, J, sh_size);
@@ -94,25 +100,6 @@ void matirx_multiple(float *A_h, float *B_h, float *C_h, size_t I, size_t K, siz
     cudaFree(C_d);
 }
 
-void test_result(float *A, float *B, float *C, size_t I, size_t K, size_t J) {
-    for (int i = 0; i < I; ++i) {
-        for (int j = 0; j < J; ++j) {
-
-            float sum = 0;
-            for (int k = 0; k < K; ++k) {
-                sum += A[i*K+k] * B[k*J + j];
-            }
-
-            if (abs(sum - C[i*J + j]) < 0.1) {
-                printf("C[%0.f][%0.f]=%0.f, %0.f, fail.\n", i, j, sum, C[i*J + j]);
-                return;
-            }
-        }
-    }
-
-    printf("success.\n");
-}
-
 void show_matrix(float* M, size_t m, size_t n) {
     for (size_t i=0; i < m; ++i) {
         for (size_t j=0; j < n; ++j) {
@@ -122,8 +109,29 @@ void show_matrix(float* M, size_t m, size_t n) {
     }
 }
 
+
+void test_result(float *A, float *B, float *C, size_t I, size_t K, size_t J) {
+    for (int i = 0; i < I; ++i) {
+        for (int j = 0; j < J; ++j) {
+
+            float sum = 0;
+            for (int k = 0; k < K; ++k) {
+                sum += A[i*K+k] * B[k*J + j];
+            }
+
+            if (abs(sum - C[i*J + j]) > 0.1) {
+                printf("C[%d][%d]=%0.f, %0.f, fail.\n", i, j, sum, C[i*J + j]);
+                return;
+            }
+        }
+    }
+
+    printf("success.\n");
+}
+
+
 int main() {
-    size_t I = 5, K = 4, J = 6;
+    size_t I = 1000, K = 1100, J = 1600;
     float *A, *B, *C;
 
     A = (float*) malloc(sizeof(float) * I * K);
@@ -143,14 +151,14 @@ int main() {
         }
     }
 
-    show_matrix(A, I, K);
-    show_matrix(B, K, J);
+    //show_matrix(A, I, K);
+    //show_matrix(B, K, J);
 
     matirx_multiple(A, B, C, I, K, J);
 
-    test_result(A, B, C, I, J, K);
+    test_result(A, B, C, I, K, J);
 
-    show_matrix(C, I, J);
+    //show_matrix(C, I, J);
 
     free(A);
     free(B);
